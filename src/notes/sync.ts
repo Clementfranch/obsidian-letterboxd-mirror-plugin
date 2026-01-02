@@ -185,19 +185,15 @@ export async function importFromCSV(
 		);
 
 		// Parse and enrich CSV files (fetches viewing ID and TMDB ID from Letterboxd)
-		const entries = await parseLetterboxdExport(
-			diaryCSV,
-			reviewsCSV,
-			(current, total) => {
-				if (current % 10 === 0 || current === total) {
-					notify(
-						`Letterboxd: Fetching data... ${current}/${total}`,
-						notificationLevel,
-						"progress"
-					);
-				}
+		const entries = await parseLetterboxdExport(diaryCSV, reviewsCSV, (current, total) => {
+			if (current % 10 === 0 || current === total) {
+				notify(
+					`Letterboxd: Fetching data... ${current}/${total}`,
+					notificationLevel,
+					"progress"
+				);
 			}
-		);
+		});
 
 		if (entries.length === 0) {
 			notify("Letterboxd: No entries found in CSV", notificationLevel, "progress");
