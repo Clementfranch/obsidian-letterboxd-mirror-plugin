@@ -1,52 +1,79 @@
 import type { LetterboxdEntry } from "../types";
-import { createTemplateEngine } from "../template-engine";
-import type { RawValue } from "../template-engine";
+import {
+	renderTemplate as etaRender,
+	generateFilename as etaGenerateFilename,
+} from "../eta/engine";
+import { str, arr, num, bool, rating } from "../eta/fluent";
+import type {
+	FluentString,
+	FluentNumber,
+	FluentBoolean,
+	FluentArray,
+	FluentRating,
+} from "../eta/fluent";
 
 /**
- * Map of template variable names to their accessor functions
+ * Wrapped Letterboxd entry data for Eta templates
+ * All properties are fluent wrappers enabling chainable methods
  */
-const LETTERBOXD_ACCESSORS: Record<string, (entry: LetterboxdEntry) => RawValue> = {
-	filmTitle: (e) => e.filmTitle,
-	filmYear: (e) => e.filmYear,
-	userRatingNoOver5: (e) => (e.userRatingNo !== null ? e.userRatingNo : ""),
-	userRatingNoOver10: (e) => (e.userRatingNo !== null ? e.userRatingNo * 2 : ""),
-	userRatingStars: (e) => e.userRatingStars,
-	watchedDate: (e) => e.watchedDate,
-	watchedDatetime: (e) => (e.watchedDate ? `${e.watchedDate}T00:00` : ""),
-	rewatch: (e) => e.rewatch,
-	link: (e) => e.link,
-	tmdbId: (e) => e.tmdbId,
-	posterUrl: (e) => e.posterUrl,
-	guid: (e) => e.guid,
-	review: (e) => e.review,
-	pubDate: (e) => e.pubDate,
-	containsSpoilers: (e) => e.containsSpoilers,
-	tags: (e) => e.tags,
-};
+interface WrappedLetterboxdEntry {
+	filmTitle: FluentString;
+	filmYear: FluentNumber;
+	/** User rating with .over(base) and .stars() methods */
+	userRating: FluentRating;
+	watchedDate: FluentString;
+	watchedDatetime: FluentString;
+	rewatch: FluentBoolean;
+	link: FluentString;
+	tmdbId: FluentString;
+	posterUrl: FluentString;
+	guid: FluentString;
+	review: FluentString;
+	pubDate: FluentString;
+	containsSpoilers: FluentBoolean;
+	tags: FluentArray;
+}
 
 /**
- * Create the Letterboxd template engine
+ * Transforms a LetterboxdEntry into wrapped data for Eta templates
  */
-const letterboxdEngine = createTemplateEngine({
-	accessors: LETTERBOXD_ACCESSORS,
-});
+function wrapLetterboxdEntry(entry: LetterboxdEntry): WrappedLetterboxdEntry {
+	return {
+		filmTitle: str(entry.filmTitle),
+		filmYear: num(entry.filmYear),
+		userRating: rating(entry.userRatingNo),
+		watchedDate: str(entry.watchedDate),
+		watchedDatetime: str(entry.watchedDate ? `${entry.watchedDate}T00:00` : ""),
+		rewatch: bool(entry.rewatch),
+		link: str(entry.link),
+		tmdbId: str(entry.tmdbId),
+		posterUrl: str(entry.posterUrl),
+		guid: str(entry.guid),
+		review: str(entry.review),
+		pubDate: str(entry.pubDate),
+		containsSpoilers: bool(entry.containsSpoilers),
+		tags: arr(entry.tags),
+	};
+}
 
 /**
  * Renders a template with the given Letterboxd entry data
- * @param template - Template string with {{variables}} and {{#if}}...{{/if}} blocks
+ * @param template - Eta template string with <%= it.variable %> syntax
  * @param entry - Letterboxd entry data
  * @returns Rendered template string
  */
 export function renderTemplate(template: string, entry: LetterboxdEntry): string {
-	return letterboxdEngine.render(template, entry);
+	const data = wrapLetterboxdEntry(entry);
+	return etaRender(template, data);
 }
 
 /**
  * Generates a filename from the template and entry data
- * @param filenameTemplate - Filename template with {{variables}}
+ * @param filenameTemplate - Eta filename template with <%= it.variable %> syntax
  * @param entry - Letterboxd entry data
  * @returns Safe filename (without .md extension)
  */
 export function generateFilename(filenameTemplate: string, entry: LetterboxdEntry): string {
-	return letterboxdEngine.generateFilename(filenameTemplate, entry);
+	const data = wrapLetterboxdEntry(entry);
+	return etaGenerateFilename(filenameTemplate, data);
 }

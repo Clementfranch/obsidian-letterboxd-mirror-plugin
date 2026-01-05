@@ -1,22 +1,22 @@
 ---
-film: "[[{{filmTitle}}]]"
-rating: {{userRatingNoOver5}}
-watched_date: {{watchedDate}}
-letterboxd_url: "{{link}}"
-tmdb_id: {{tmdbId}}
-poster: "{{posterUrl}}"
-letterboxd_guid: {{guid}}
-letterboxd_tags: {{tags}}
+film: "[[<%= it.filmTitle %> (<%= it.filmYear %>)]]"
+rating: <%= it.userRating.over(10) %>
+watched_date: <%= it.watchedDate %>
+letterboxd_url: <%= it.link.yaml() %>
+tmdb_id: <%= it.tmdbId %>
+poster: <%= it.posterUrl.yaml() %>
+letterboxd_guid: <%= it.guid %>
+letterboxd_tags: <%= it.tags.yaml() %>
 ---
 
-# [[{{filmTitle}}]] ({{filmYear}})
+# [[<%= it.filmTitle %> (<%= it.filmYear %>)]]
 
-![]({{posterUrl}})
+<% if (!it.posterUrl.isEmpty()) { %>![Poster](<%= it.posterUrl %>)
+<% } %>
+**Rating**: <%= it.userRating.stars() %>
+**Watched**: <%= it.watchedDate %><% if (it.rewatch.isTrue()) { %> (rewatch)<% } %>
 
-**Rating**: {{userRatingStars}}
-**Watched**: {{watchedDate}}{{#if rewatch}} (rewatch){{/if}}
-
-> {{review}}
-
+<% if (!it.review.isEmpty()) { %><%= it.review.quote() %>
+<% } %>
 ---
-[View on Letterboxd]({{link}})
+[View on Letterboxd](<%= it.link %>)

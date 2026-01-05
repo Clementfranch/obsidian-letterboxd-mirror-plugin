@@ -1,131 +1,253 @@
 import type { TMDBMovie } from "./types";
-import { createTemplateEngine, wikiLink, formatArray } from "../template-engine";
-import type { RawValue, TemplateParams } from "../template-engine";
+import {
+	renderTemplate as etaRender,
+	generateFilename as etaGenerateFilename,
+} from "../eta/engine";
+import { str, arr, num, poster, backdrop, FluentArray, FluentImage } from "../eta/fluent";
+import type { FluentString, FluentNumber } from "../eta/fluent";
 
 /**
- * Map of template variable names to their accessor functions
+ * Wrapped TMDB movie data for Eta templates
+ * All properties are fluent wrappers enabling chainable methods
  */
-const TMDB_ACCESSORS: Record<string, (movie: TMDBMovie) => RawValue> = {
+interface WrappedTMDBMovie {
 	// Core identifiers
-	tmdbId: (m) => m.tmdbId,
-	imdbId: (m) => m.imdbId,
-	tmdbUrl: (m) => m.tmdbUrl,
+	tmdbId: FluentNumber;
+	imdbId: FluentString;
+	tmdbUrl: FluentString;
 
 	// Titles
-	title: (m) => m.title,
-	originalTitle: (m) => m.originalTitle,
-	originalLanguage: (m) => m.originalLanguage,
+	title: FluentString;
+	originalTitle: FluentString;
+	originalLanguage: FluentString;
 
 	// Dates and timing
-	year: (m) => m.year,
-	releaseDate: (m) => m.releaseDate,
-	runtime: (m) => m.runtime,
-	runtimeFormatted: (m) => m.runtimeFormatted,
+	year: FluentNumber;
+	releaseDate: FluentString;
+	runtime: FluentNumber;
+	runtimeFormatted: FluentString;
 
 	// Content
-	overview: (m) => m.overview,
-	tagline: (m) => m.tagline,
+	overview: FluentString;
+	tagline: FluentString;
 
 	// Genres
-	genres: (m) => m.genres,
-	genreList: (m) => m.genreList,
+	genres: FluentArray;
 
 	// Ratings
-	tmdbRating: (m) => m.tmdbRating,
-	tmdbVoteCount: (m) => m.tmdbVoteCount,
+	tmdbRating: FluentNumber;
+	tmdbVoteCount: FluentNumber;
 
 	// Financials
-	budget: (m) => m.budget,
-	revenue: (m) => m.revenue,
+	budget: FluentNumber;
+	revenue: FluentNumber;
 
-	// Poster URLs (all sizes)
-	posterUrlXXS: (m) => m.posterUrlXXS,
-	posterUrlXS: (m) => m.posterUrlXS,
-	posterUrlS: (m) => m.posterUrlS,
-	posterUrlM: (m) => m.posterUrlM,
-	posterUrlL: (m) => m.posterUrlL,
-	posterUrlXL: (m) => m.posterUrlXL,
-	posterUrlOG: (m) => m.posterUrlOG,
-
-	// Backdrop URLs (all sizes)
-	backdropUrlS: (m) => m.backdropUrlS,
-	backdropUrlM: (m) => m.backdropUrlM,
-	backdropUrlL: (m) => m.backdropUrlL,
-	backdropUrlOG: (m) => m.backdropUrlOG,
+	// Images - use .size("L") or .size(500)
+	poster: FluentImage;
+	backdrop: FluentImage;
 
 	// Production info
-	productionCompanies: (m) => m.productionCompanies,
-	productionCompanyList: (m) => m.productionCompanyList,
-	spokenLanguages: (m) => m.spokenLanguages,
-	spokenLanguageList: (m) => m.spokenLanguageList,
-	collection: (m) => m.collection,
+	productionCompanies: FluentArray;
+	spokenLanguages: FluentArray;
+	collection: FluentString;
 
 	// Credits
-	cast: (m) => m.cast,
-	characters: (m) => m.characters,
-	directors: (m) => m.directors,
-};
+	cast: FluentArray;
+	characters: FluentArray;
+	directors: FluentArray;
 
-/**
- * Special handler for castWithRoles - generates "Actor as Character" strings
- * with optional linking for actors and/or characters
- */
-function handleCastWithRoles(movie: TMDBMovie, params: TemplateParams): string {
-	const maxItems = params.top ?? movie.cast.length;
-	const roles: string[] = [];
-
-	for (let i = 0; i < Math.min(maxItems, movie.cast.length); i++) {
-		let actor = movie.cast[i];
-		let character = movie.characters[i] || "";
-
-		if (params.linkActors) {
-			actor = wikiLink(actor);
-		}
-		if (params.linkCharacters && character) {
-			character = wikiLink(character);
-		}
-
-		roles.push(`${actor} as ${character}`);
-	}
-
-	// Use formatArray but without top (already applied) and without link (already applied per-item)
-	const formatParams: TemplateParams = {
-		...params,
-		top: undefined,
-		link: undefined,
-		linkActors: undefined,
-		linkCharacters: undefined,
-	};
-
-	return formatArray(roles, formatParams);
+	// Special: Cast with roles helper
+	castWithRoles: CastWithRolesHelper;
 }
 
 /**
- * Create the TMDB template engine with special handlers
+ * Helper class for generating "Actor as Character" formatted output
+ * Supports fluent chaining for formatting options
  */
-const tmdbEngine = createTemplateEngine({
-	accessors: TMDB_ACCESSORS,
-	specialHandlers: {
-		castWithRoles: handleCastWithRoles,
-	},
-});
+class CastWithRolesHelper {
+	private castList: string[];
+	private characterList: string[];
+	private maxItems?: number;
+	private linkActorsFlag = false;
+	private linkCharactersFlag = false;
+
+	constructor(cast: string[], characters: string[]) {
+		this.castList = cast;
+		this.characterList = characters;
+	}
+
+	/** Limit to top N cast members */
+	top(n: number): CastWithRolesHelper {
+		const helper = new CastWithRolesHelper(this.castList, this.characterList);
+		helper.maxItems = n;
+		helper.linkActorsFlag = this.linkActorsFlag;
+		helper.linkCharactersFlag = this.linkCharactersFlag;
+		return helper;
+	}
+
+	/** Enable wiki-links for actor names */
+	linkActors(): CastWithRolesHelper {
+		const helper = new CastWithRolesHelper(this.castList, this.characterList);
+		helper.maxItems = this.maxItems;
+		helper.linkActorsFlag = true;
+		helper.linkCharactersFlag = this.linkCharactersFlag;
+		return helper;
+	}
+
+	/** Enable wiki-links for character names */
+	linkCharacters(): CastWithRolesHelper {
+		const helper = new CastWithRolesHelper(this.castList, this.characterList);
+		helper.maxItems = this.maxItems;
+		helper.linkActorsFlag = this.linkActorsFlag;
+		helper.linkCharactersFlag = true;
+		return helper;
+	}
+
+	/** Build the roles array */
+	private buildRoles(): string[] {
+		const limit = this.maxItems ?? this.castList.length;
+		const roles: string[] = [];
+
+		for (let i = 0; i < Math.min(limit, this.castList.length); i++) {
+			let actor = this.castList[i];
+			let character = this.characterList[i] || "";
+
+			if (this.linkActorsFlag) {
+				actor = `[[${actor}]]`;
+			}
+			if (this.linkCharactersFlag && character) {
+				character = `[[${character}]]`;
+			}
+
+			roles.push(`${actor} as ${character}`);
+		}
+
+		return roles;
+	}
+
+	/** Get as FluentArray for further chaining */
+	toArray(): FluentArray {
+		return new FluentArray(this.buildRoles());
+	}
+
+	/** Format as comma-separated string */
+	toString(): string {
+		return this.buildRoles().join(", ");
+	}
+
+	/** Format as bullet list */
+	bullet(): string {
+		return this.buildRoles()
+			.map((role) => `- ${role}`)
+			.join("\n");
+	}
+
+	/** Format as YAML inline array */
+	yaml(): string {
+		const roles = this.buildRoles();
+		const quoted = roles.map((r) => `"${r.replace(/"/g, '\\"')}"`);
+		return `[${quoted.join(", ")}]`;
+	}
+
+	/** Format as YAML multiline list (indented for frontmatter) */
+	yamlMultiline(): string {
+		return this.buildRoles()
+			.map((role) => `  - ${role}`)
+			.join("\n");
+	}
+}
+
+/**
+ * Transforms a TMDBMovie into wrapped data for Eta templates
+ */
+function wrapTMDBMovie(movie: TMDBMovie): WrappedTMDBMovie {
+	// Extract poster and backdrop paths from the full URLs
+	// URLs are like: https://image.tmdb.org/t/p/w500/abc123.jpg
+	// We need just: /abc123.jpg
+	const posterPath = extractImagePath(movie.posterUrlOG);
+	const backdropPath = extractImagePath(movie.backdropUrlOG);
+
+	return {
+		// Core identifiers
+		tmdbId: num(movie.tmdbId),
+		imdbId: str(movie.imdbId),
+		tmdbUrl: str(movie.tmdbUrl),
+
+		// Titles
+		title: str(movie.title),
+		originalTitle: str(movie.originalTitle),
+		originalLanguage: str(movie.originalLanguage),
+
+		// Dates and timing
+		year: num(movie.year),
+		releaseDate: str(movie.releaseDate),
+		runtime: num(movie.runtime),
+		runtimeFormatted: str(movie.runtimeFormatted),
+
+		// Content
+		overview: str(movie.overview),
+		tagline: str(movie.tagline),
+
+		// Genres
+		genres: arr(movie.genres),
+
+		// Ratings
+		tmdbRating: num(movie.tmdbRating),
+		tmdbVoteCount: num(movie.tmdbVoteCount),
+
+		// Financials
+		budget: num(movie.budget),
+		revenue: num(movie.revenue),
+
+		// Images
+		poster: poster(posterPath),
+		backdrop: backdrop(backdropPath),
+
+		// Production info
+		productionCompanies: arr(movie.productionCompanies),
+		spokenLanguages: arr(movie.spokenLanguages),
+		collection: str(movie.collection),
+
+		// Credits
+		cast: arr(movie.cast),
+		characters: arr(movie.characters),
+		directors: arr(movie.directors),
+
+		// Special helper
+		castWithRoles: new CastWithRolesHelper(movie.cast, movie.characters),
+	};
+}
+
+/**
+ * Extracts the image path from a full TMDB URL
+ * @param url - Full URL like "https://image.tmdb.org/t/p/original/abc123.jpg"
+ * @returns Path like "/abc123.jpg" or empty string if no URL
+ */
+function extractImagePath(url: string): string {
+	if (!url) return "";
+	// Match the path after the size segment (e.g., /original, /w500)
+	const match = url.match(/\/t\/p\/[^/]+(\/.+)$/);
+	return match ? match[1] : "";
+}
 
 /**
  * Renders a template with the given TMDB movie data
- * @param template - Template string with {{variables}} and {{#if}}...{{/if}} blocks
+ * @param template - Eta template string with <%= it.variable %> syntax
  * @param movie - TMDB movie data
  * @returns Rendered template string
  */
 export function renderTMDBTemplate(template: string, movie: TMDBMovie): string {
-	return tmdbEngine.render(template, movie);
+	const data = wrapTMDBMovie(movie);
+	return etaRender(template, data);
 }
 
 /**
  * Generates a filename from the template and movie data
- * @param filenameTemplate - Filename template with {{variables}}
+ * @param filenameTemplate - Eta filename template with <%= it.variable %> syntax
  * @param movie - TMDB movie data
  * @returns Safe filename (without .md extension)
  */
 export function generateTMDBFilename(filenameTemplate: string, movie: TMDBMovie): string {
-	return tmdbEngine.generateFilename(filenameTemplate, movie);
+	const data = wrapTMDBMovie(movie);
+	return etaGenerateFilename(filenameTemplate, data);
 }

@@ -48,10 +48,10 @@ Controls when sync notifications are shown.
 
 Template for diary note filenames. Supports template variables.
 
-- **Default**: `{{watchedDate}} - {{filmTitle}}`
+- **Default**: `<%= it.watchedDate %> - <%= it.filmTitle %>`
 - **Example output**: `2024-01-15 - The Godfather.md`
 
-Available variables: `{{filmTitle}}`, `{{filmYear}}`, `{{watchedDate}}`, `{{tmdbId}}`
+Available variables: `it.filmTitle`, `it.filmYear`, `it.watchedDate`, `it.tmdbId`
 
 ### Note template
 
@@ -65,7 +65,7 @@ The Movie Database (TMDB) integration allows you to create Film notes with rich 
 
 ### API read access token
 
-Your TMDB API Read Access Token (Bearer token).
+Your TMDB API Read Access Token.
 
 **To get a token:**
 1. Create a free account at [themoviedb.org](https://www.themoviedb.org/)
@@ -93,10 +93,10 @@ Supported languages include: English, Spanish, French, German, Italian, Portugue
 
 Template for Film note filenames.
 
-- **Default**: `{{title}} ({{year}})`
+- **Default**: `<%= it.title %> (<%= it.year %>)`
 - **Example output**: `The Godfather (1972).md`
 
-Available variables: `{{title}}`, `{{originalTitle}}`, `{{year}}`, `{{tmdbId}}`, `{{imdbId}}`
+Available variables: `it.title`, `it.originalTitle`, `it.year`, `it.tmdbId`, `it.imdbId`
 
 ### Film note template
 
