@@ -41,6 +41,32 @@ export default class LetterboxdPlugin extends Plugin {
 			callback: () => this.syncTMDBFilms(),
 		});
 
+		// Debug: Check TMDB API Key in vault secrets
+		this.addCommand({
+			id: "debug-check-tmdb-key",
+			name: "[Debug] Check TMDB API Key",
+			callback: async () => {
+				try {
+					const secret = await this.app.vault.getSecret("letterboxd-tmdb-api-key");
+					if (secret) {
+						const masked = secret.substring(0, 20) + "...";
+						new Notice(`✓ TMDB API Key found: ${masked}`);
+						if (window.DEBUG) {
+							console.log("[Letterboxd Plugin] TMDB API Key from vault:", secret);
+						}
+					} else {
+						new Notice("⚠ No TMDB API Key found in vault secrets");
+						if (window.DEBUG) {
+							console.log("[Letterboxd Plugin] TMDB API Key: not set");
+						}
+					}
+				} catch (e) {
+					new Notice(`✗ Error accessing TMDB API Key: ${String(e)}`);
+					console.error("[Letterboxd Plugin] Error retrieving TMDB API key:", e);
+				}
+			},
+		});
+
 		// Add ribbon icon
 		this.addRibbonIcon("clapperboard", "Sync Letterboxd diary", () => {
 			void this.syncDiary();
@@ -62,10 +88,39 @@ export default class LetterboxdPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.updateDebugMode();
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		// Save TMDB API key to vault secrets
+		if (this.settings.tmdbApiKey) {
+			try {
+				await this.app.vault.setSecret("letterboxd-tmdb-api-key", this.settings.tmdbApiKey);
+			} catch (e) {
+				console.warn("[Letterboxd Plugin] Could not save API key to vault secret:", e);
+			}
+		}
+	}
+
+	updateDebugMode(): void {
+		window.DEBUG = this.settings.debug;
+		if (window.DEBUG) {
+			console.log("[Letterboxd Plugin] Debug mode enabled");
+		}
+	}
+
+	async getTmdbApiKey(): Promise<string> {
+		try {
+			const secret = await this.app.vault.getSecret("letterboxd-tmdb-api-key");
+			if (secret) {
+				return secret;
+			}
+		} catch (e) {
+			console.warn("[Letterboxd Plugin] Error retrieving TMDB API key from vault:", e);
+		}
+		// Fallback to settings value
+		return this.settings.tmdbApiKey || "";
 	}
 
 	/**

@@ -77,4 +77,6 @@ export interface LetterboxdSettings {
 	tmdbLanguage: string;
 	/** Frontmatter key used to store TMDB ID for deduplication */
 	tmdbIdFrontmatterKey: string;
+	/** Enable debug logging to console */
+	debug: boolean;
 }

@@ -169,6 +169,7 @@ export const DEFAULT_SETTINGS: LetterboxdSettings = {
 	tmdbNoteTemplate: DEFAULT_TMDB_NOTE_TEMPLATE,
 	tmdbLanguage: DEFAULT_TMDB_LANGUAGE,
 	tmdbIdFrontmatterKey: DEFAULT_TMDB_ID_KEY,
+	debug: false,
 };
 
 export class LetterboxdSettingTab extends PluginSettingTab {
@@ -341,8 +342,10 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.tmdbApiKey)
 					.onChange((value) => {
 						this.plugin.settings.tmdbApiKey = value.trim();
+						void this.saveApiKeyToVault();
 						this.debouncedSave();
 					});
+				text.inputEl.type = "password";
 				text.inputEl.addClass("letterboxd-monospace-input");
 			});
 
@@ -455,6 +458,27 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 					});
 				text.inputEl.addClass("letterboxd-monospace-input");
 			});
+
+		new Setting(containerEl)
+			.setName("Debug logging")
+			.setDesc("Enable detailed logging to console for troubleshooting")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.debug).onChange((value) => {
+					this.plugin.settings.debug = value;
+					this.plugin.updateDebugMode();
+					this.debouncedSave();
+				})
+			);
+	}
+
+	private async saveApiKeyToVault(): Promise<void> {
+		if (this.plugin.settings.tmdbApiKey) {
+			try {
+				await this.app.vault.setSecret("letterboxd-tmdb-api-key", this.plugin.settings.tmdbApiKey);
+			} catch (e) {
+				console.warn("[Letterboxd Plugin] Could not save API key to vault secret:", e);
+			}
+		}
 	}
 }
 
