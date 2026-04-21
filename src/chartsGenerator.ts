@@ -48,9 +48,7 @@ export class ChartsGenerator {
     public async generateCharts(): Promise<string> {
         const films = await this.getWatchedFilms();
         
-        let content = "# Charts & Statistics
-
-";
+        let content = "# Charts & Statistics\\n\\n";
         
         content += this.generateGenreDistribution(films);
         content += this.generateDirectorDistribution(films);
@@ -141,8 +139,7 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
             content += `- **${key}:** ${value} ${bar}
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
 
@@ -156,3 +153,4 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
 export function createChartsGenerator(app: App, accountFolder: string): ChartsGenerator {
     return new ChartsGenerator(app, accountFolder);
 }
+

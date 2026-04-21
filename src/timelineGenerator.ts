@@ -73,15 +73,12 @@ export class TimelineGenerator {
             }
         }
         
-        let content = "# Films by Year and Month
-
-";
+        let content = "# Films by Year and Month\\n\\n";
         if (genre) content += `**Genre:** ${genre}
 `;
         if (director) content += `**Director:** ${director}
 `;
-        content += "
-";
+        content += "\\n";
 
         const years = Object.keys(countsByYear).map(Number).sort((a, b) => b - a);
         const maxCount = Math.max(...Object.values(countsByYear).flatMap(months => Object.values(months).map(m => m.count)));
@@ -102,8 +99,7 @@ export class TimelineGenerator {
 `;
                 }
             }
-            content += "
-";
+            content += "\\n";
         }
         
         content += `---
@@ -124,3 +120,4 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
 export function createTimelineGenerator(app: App, accountFolder: string): TimelineGenerator {
     return new TimelineGenerator(app, accountFolder);
 }
+

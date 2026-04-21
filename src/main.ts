@@ -585,11 +585,9 @@ export default class LetterboxdPlugin extends Plugin {
 					? new Date(acc.lastSync).toLocaleString()
 					: "Never";
 				const active = acc.isActive ? "✓ Active" : "";
-				return `• ${acc.name} (${acc.username}) - ${acc.type} ${active}
-  Last sync: ${lastSync}`;
+				return `• ${acc.name} (${acc.username}) - ${acc.type} ${active}\n  Last sync: ${lastSync}`;
 			})
-			.join("
-");
+			.join("\n");
 
 		new Notice(`Accounts:
 
@@ -1028,25 +1026,15 @@ ${accountsList}`);
         }
 
         const filmTitle = String(metadata.title_original || metadata.title_fr || file.basename);
-        const filmYear = Number(metadata.year);
-        const tmdbId = String(metadata.tmdb_id || "");
+        const filmYear = Number(metadata.year || 0);
 
-        let movie: TMDBMovie | undefined;
-        if (tmdbId) {
-            const tmdbApiKey = await this.getTmdbApiKey();
-            if (tmdbApiKey) {
-                try {
-                    movie = await fetchTMDBMovie(tmdbId, tmdbApiKey, this.settings.tmdbLanguage, true);
-                } catch (e) {
-                    console.warn(`[Letterboxd Plugin] Could not fetch TMDB data for ${tmdbId}:`, e);
-                }
-            }
-        }
-        
         const templateManager = createTemplateManager(this.app);
-        const modal = new ReviewTemplateModal(this.app, templateManager, filmTitle, filmYear, movie);
-        modal.onSelected = (templateName, movie) => {
-            templateManager.createReviewFromTemplate(templateName, filmTitle, filmYear, movie);
+        const modal = new ReviewTemplateModal(this.app, templateManager, filmTitle, filmYear);
+        modal.onSelected = (templateName: string) => {
+            void templateManager.createReviewFromTemplate(templateName, filmTitle, filmYear).catch((e) => {
+                console.error("Error creating review from template:", e);
+                new Notice("Failed to create review from template");
+            });
         };
         modal.open();
     }

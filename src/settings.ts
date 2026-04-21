@@ -1,4 +1,4 @@
-import { App, normalizePath, PluginSettingTab, Setting, debounce, Notice } from "obsidian";
+import { App, normalizePath, PluginSettingTab, Setting, debounce, Notice, Modal } from "obsidian";
 import type LetterboxdPlugin from "./main";
 import type { LetterboxdSettings, NotificationLevel, LetterboxdAccount } from "./types";
 import { TemplateEditorModal } from "./ui/template-editor-modal";
@@ -326,26 +326,83 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setDesc(tmdbDesc);
 
-		new Setting(containerEl)
-			.setName("API read access token")
-			.setDesc(
-				createDescWithLink(
-					"Get your token from ",
-					"TMDB API settings",
-					"https://www.themoviedb.org/settings/api"
-				)
-			)
-			.addText((text) => {
-				text.setPlaceholder("Enter your TMDB API token")
-					.setValue(this.plugin.settings.tmdbApiKey)
-					.onChange((value) => {
-						this.plugin.settings.tmdbApiKey = value.trim();
-						void this.saveApiKeyToVault();
-						this.debouncedSave();
-					});
-				text.inputEl.type = "password";
-				text.inputEl.addClass("letterboxd-monospace-input");
-			});
+		const tmdbTokenSetting = new Setting(containerEl)
+.setName("API read access token")
+.setDesc(
+createDescWithLink(
+"Get your token from ",
+"TMDB API settings",
+"https://www.themoviedb.org/settings/api"
+)
+);
+
+// Set token button
+new Setting(containerEl).addButton((btn) => {
+btn.setButtonText("Set token").onClick(() => {
+const modal = new Modal(this.app);
+modal.titleEl.setText("Set TMDB API token");
+const input = document.createElement("input");
+input.type = "password";
+input.placeholder = "Enter TMDB token";
+input.className = "setting-text-input letterboxd-monospace-input";
+modal.contentEl.appendChild(input);
+const saveBtn = document.createElement("button");
+saveBtn.textContent = "Save token";
+saveBtn.className = "mod-cta";
+saveBtn.style.marginTop = "8px";
+saveBtn.onclick = async () => {
+const val = (input as HTMLInputElement).value.trim();
+if (!val) {
+new Notice("Token cannot be empty");
+return;
+}
+try {
+await this.app.vault.setSecret("letterboxd-tmdb-api-key", val);
+this.plugin.settings.tmdbApiKey = "";
+await this.plugin.saveSettings();
+new Notice("TMDB token saved to vault secrets");
+modal.close();
+} catch (e) {
+console.error("Error saving TMDB token:", e);
+new Notice("Failed to save token to vault secrets");
+}
+};
+modal.contentEl.appendChild(saveBtn);
+modal.open();
+});
+});
+
+// Remove token button
+new Setting(containerEl).addButton((btn) => {
+btn.setButtonText("Remove token").setWarning().onClick(async () => {
+try {
+await this.app.vault.removeSecret("letterboxd-tmdb-api-key");
+this.plugin.settings.tmdbApiKey = "";
+await this.plugin.saveSettings();
+new Notice("TMDB token removed from vault secrets");
+} catch (e) {
+console.warn("Could not remove TMDB token:", e);
+new Notice("Failed to remove TMDB token");
+}
+});
+});
+
+// Show masked token status asynchronously
+(async () => {
+try {
+const secret = await this.plugin.getTmdbApiKey();
+if (secret) {
+const masked = secret.length > 8 ? secret.substring(0, 4) + "..." + secret.substring(secret.length - 4) : "(set)";
+tmdbTokenSetting.setDesc(() => {
+const frag = createDescWithLink("Get your token from ", "TMDB API settings", "https://www.themoviedb.org/settings/api");
+frag.appendText(` Current token: ${masked}`);
+return frag;
+});
+}
+} catch (e) {
+console.warn("Error checking TMDB secret:", e);
+}
+})();
 
 		new Setting(containerEl)
 			.setName("Film folder")
@@ -463,7 +520,11 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.debug).onChange((value) => {
 					this.plugin.settings.debug = value;
-					this.plugin.updateDebugMode();
+					if (typeof (this.plugin as any).updateDebugMode === "function") {
+						(this.plugin as any).updateDebugMode();
+					} else {
+						console.warn("[Letterboxd Plugin] updateDebugMode not available on plugin instance");
+					}
 					this.debouncedSave();
 				})
 			);
@@ -591,3 +652,4 @@ function createDescWithVariables(prefix: string, variables: string[]): DocumentF
 	});
 	return desc;
 }
+

@@ -105,9 +105,7 @@ export class StreakCalculator {
     public async generateStreakReport(): Promise<string> {
         const streaks = await this.calculateStreaks();
         
-        let content = "# Watch Streak
-
-";
+        let content = "# Watch Streak\\n\\n";
         content += `- **Current Streak:** ${streaks.currentStreak} days
 `;
         content += `- **Longest Streak:** ${streaks.longestStreak} days
@@ -141,3 +139,4 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
 export function createStreakCalculator(app: App, accountFolder: string): StreakCalculator {
     return new StreakCalculator(app, accountFolder);
 }
+

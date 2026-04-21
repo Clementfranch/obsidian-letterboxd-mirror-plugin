@@ -51,9 +51,7 @@ export class RankingsGenerator {
     public async generateRankings(): Promise<string> {
         const films = await this.getWatchedFilms();
         
-        let content = "# Top Rankings
-
-";
+        let content = "# Top Rankings\\n\\n";
         
         content += this.generateTopDirectors(films);
         content += this.generateTopActors(films);
@@ -85,16 +83,13 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
         
         const sorted = Object.entries(stats).sort((a, b) => b[1].count - a[1].count).slice(0, 20);
 
-        let content = "## Top Directors
-
-";
+        let content = "## Top Directors\\n\\n";
         for (const [director, data] of sorted) {
             const avgRating = data.ratings.length > 0 ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1) : "N/A";
             content += `- **${director}:** ${data.count} films, Avg rating: ${avgRating}, Total hours: ${Math.round(data.hours)}
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
 
@@ -112,16 +107,13 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
         
         const sorted = Object.entries(stats).sort((a, b) => b[1].count - a[1].count).slice(0, 20);
 
-        let content = "## Top Actors
-
-";
+        let content = "## Top Actors\\n\\n";
         for (const [actor, data] of sorted) {
             const avgRating = data.ratings.length > 0 ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1) : "N/A";
             content += `- **${actor}:** ${data.count} films, Avg rating: ${avgRating}
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
     
@@ -139,16 +131,13 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
         
         const sorted = Object.entries(stats).sort((a, b) => b[1].count - a[1].count);
 
-        let content = "## Top Genres
-
-";
+        let content = "## Top Genres\\n\\n";
         for (const [genre, data] of sorted) {
             const avgRating = data.ratings.length > 0 ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1) : "N/A";
             content += `- **${genre}:** ${data.count} films, Avg rating: ${avgRating}
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
     
@@ -166,31 +155,25 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
         
         const sorted = Object.entries(stats).sort((a, b) => b[1].count - a[1].count).slice(0, 20);
 
-        let content = "## Top Studios
-
-";
+        let content = "## Top Studios\\n\\n";
         for (const [studio, data] of sorted) {
             const avgRating = data.ratings.length > 0 ? (data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length).toFixed(1) : "N/A";
             content += `- **${studio}:** ${data.count} films, Avg rating: ${avgRating}
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
     
     private generateMostRewatched(films: FilmRankingData[]): string {
         const sorted = films.filter(f => f.watch_count && f.watch_count > 1).sort((a, b) => (b.watch_count || 0) - (a.watch_count || 0)).slice(0, 10);
 
-        let content = "## Most Rewatched Films
-
-";
+        let content = "## Most Rewatched Films\\n\\n";
         for (const film of sorted) {
             content += `- **${film.title_original}:** ${film.watch_count} watches
 `;
         }
-        content += "
-";
+        content += "\\n";
         return content;
     }
 }
@@ -198,3 +181,4 @@ _Generated automatically. Last updated: ${new Date().toISOString()}_
 export function createRankingsGenerator(app: App, accountFolder: string): RankingsGenerator {
     return new RankingsGenerator(app, accountFolder);
 }
+
