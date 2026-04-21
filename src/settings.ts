@@ -1,7 +1,8 @@
-import { App, normalizePath, PluginSettingTab, Setting, debounce } from "obsidian";
+import { App, normalizePath, PluginSettingTab, Setting, debounce, Notice } from "obsidian";
 import type LetterboxdPlugin from "./main";
-import type { LetterboxdSettings, NotificationLevel } from "./types";
+import type { LetterboxdSettings, NotificationLevel, LetterboxdAccount } from "./types";
 import { TemplateEditorModal } from "./ui/template-editor-modal";
+import { AddAccountModal, AddAccountDetails } from "./ui/add-account-modal";
 
 /** Debounce delay for saving settings (ms) */
 const SETTINGS_SAVE_DEBOUNCE_MS = 500;
@@ -170,6 +171,9 @@ export const DEFAULT_SETTINGS: LetterboxdSettings = {
 	tmdbLanguage: DEFAULT_TMDB_LANGUAGE,
 	tmdbIdFrontmatterKey: DEFAULT_TMDB_ID_KEY,
 	debug: false,
+	// Multi-account settings
+	accounts: [],
+	activeAccountId: null,
 };
 
 export class LetterboxdSettingTab extends PluginSettingTab {
@@ -191,13 +195,7 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		// Network disclosure - using Setting for consistent styling
-		const networkDesc = document.createDocumentFragment();
-		networkDesc.appendText("This plugin fetches data from ");
-		networkDesc.createEl("code", { text: "letterboxd.com/<username>/rss" });
-		networkDesc.appendText(" to sync your diary entries.");
-
-		new Setting(containerEl).setDesc(networkDesc);
+		this.drawAccountManagement(containerEl);
 
 		// ============================================================================
 		// General settings (no heading per Obsidian guidelines)
@@ -469,6 +467,90 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 					this.debouncedSave();
 				})
 			);
+	}
+    
+    private drawAccountManagement(containerEl: HTMLElement): void {
+        new Setting(containerEl).setName("Letterboxd Accounts").setHeading();
+
+		const accounts = this.plugin.getAllAccounts();
+        
+        for (const account of accounts) {
+            const setting = new Setting(containerEl)
+                .setName(account.name)
+                .setDesc(`@${account.username} - ${account.type}`);
+
+            if (!account.isActive) {
+                setting.addButton(button => button
+                    .setButtonText("Switch to")
+                    .onClick(() => this.switchToAccount(account.id))
+                );
+            }
+            
+            setting.addDropdown(dropdown => dropdown
+                .addOption("manual", "Manual Sync")
+                .addOption("daily", "Sync Daily")
+                .addOption("weekly", "Sync Weekly")
+                .setValue(account.syncFrequency)
+                .onChange(async (value: "manual" | "daily" | "weekly") => {
+                    this.plugin.accountManager.updateSyncFrequency(account.id, value);
+                    await this.plugin.saveSettings();
+                })
+            );
+
+            setting.addButton(button => button
+                .setIcon("trash")
+                .setTooltip("Remove account")
+                .onClick(() => this.removeAccountConfirm(account.id))
+            );
+        }
+
+		new Setting(containerEl).addButton((button) =>
+			button
+				.setButtonText("+ Add Account")
+				.setCta()
+				.onClick(() => this.showAddAccountModal())
+		);
+    }
+
+	private showAddAccountModal(): void {
+		new AddAccountModal(this.app, async (details) => {
+            const { name, username, apiKey, type } = details;
+
+			if (this.plugin.accountManager.getAccountByUsername(username)) {
+				new Notice(`An account with username '${username}' already exists.`);
+				return;
+			}
+
+			this.plugin.accountManager.addAccount(name, username, type);
+			
+			try {
+				await this.app.vault.setSecret(`letterboxd-api-key-${username}`, apiKey);
+			} catch (e) {
+				console.warn(`[Letterboxd Plugin] Could not save API key for ${username}:`, e);
+				new Notice(`Could not save API key for ${username}.`);
+			}
+
+			await this.plugin.saveSettings();
+			this.display();
+        }).open();
+	}
+
+	private switchToAccount(accountId: string): void {
+		this.plugin.accountManager.setActiveAccount(accountId);
+		void this.plugin.saveSettings();
+		this.display(); // Refresh UI
+	}
+
+	private removeAccountConfirm(accountId: string): void {
+		const account = this.plugin.getAllAccounts().find((a) => a.id === accountId);
+        if (!account) return;
+
+		if (confirm(`Remove account "${account?.name}"? This cannot be undone.`)) {
+			this.plugin.accountManager.removeAccount(accountId);
+            void this.app.vault.removeSecret(`letterboxd-api-key-${account.username}`);
+			void this.plugin.saveSettings();
+			this.display();
+		}
 	}
 
 	private async saveApiKeyToVault(): Promise<void> {

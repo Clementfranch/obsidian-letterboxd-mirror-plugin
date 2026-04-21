@@ -41,6 +41,28 @@ export interface LetterboxdEntry {
 }
 
 /**
+ * Represents a single Letterboxd account (personal or friend)
+ */
+export interface LetterboxdAccount {
+	/** Unique identifier for this account */
+	id: string;
+	/** Display name (e.g., "My Account", "Alice's Films") */
+	name: string;
+	/** Letterboxd username */
+	username: string;
+	/** Account type: personal (full data) or friend (watch history only) */
+	type: "personal" | "friend";
+	/** Folder path for this account's data (e.g., "Letterboxd/MyAccount") */
+	folderPath: string;
+	/** Sync frequency: daily, weekly, or manual only */
+	syncFrequency: "daily" | "weekly" | "manual";
+	/** Whether this is the currently active account */
+	isActive: boolean;
+	/** Last successful sync timestamp (ISO 8601 string) */
+	lastSync: string | null;
+}
+
+/**
  * Plugin settings persisted to data.json
  */
 export interface LetterboxdSettings {
@@ -79,4 +101,13 @@ export interface LetterboxdSettings {
 	tmdbIdFrontmatterKey: string;
 	/** Enable debug logging to console */
 	debug: boolean;
+
+	// ============================================================================
+	// Multi-Account Settings
+	// ============================================================================
+
+	/** Configured Letterboxd accounts (personal + friends) */
+	accounts: LetterboxdAccount[];
+	/** ID of the currently active account */
+	activeAccountId: string | null;
 }
