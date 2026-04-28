@@ -101,6 +101,12 @@ export interface LetterboxdSettings {
 	tmdbIdFrontmatterKey: string;
 	/** Enable debug logging to console */
 	debug: boolean;
+	/** Template choice used for batch import: 'tmdb', 'minimal' or 'custom' */
+	batchImportTemplate?: "tmdb" | "minimal" | "custom";
+	/** Custom template content used when batchImportTemplate === 'custom' */
+	batchCustomTemplate?: string;
+	/** Maximum rating scale used for numeric rating fields (default 10) */
+	ratingScaleMax?: number;
 
 	// ============================================================================
 	// Multi-Account Settings

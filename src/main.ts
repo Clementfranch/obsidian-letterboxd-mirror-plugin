@@ -1,4 +1,5 @@
 import { Plugin, Notice, TFile, Modal, Setting } from "obsidian";
+import { setSecret, getSecret, removeSecret } from "./utils/vaultSecrets";
 import type { LetterboxdSettings, LetterboxdAccount } from "./types";
 import { DEFAULT_SETTINGS, LetterboxdSettingTab } from "./settings";
 import { syncDiary, importFromCSV } from "./notes/sync";
@@ -10,7 +11,9 @@ import {
 	syncAllAccounts,
 	syncAccountsDueForSync,
 } from "./letterboxdSync";
-import { createWatchlistSync } from "./watchlistSync";
+import { createWatchlistSync } from "./watchlistSyncV2";
+import { batchImportFilms, batchImportFilmsFromItems } from "./batchImport";
+import { createOrUpdateWiki } from "./wikiGenerator.extended";
 import { createLinkManager, openExternalUrl, copyUrlToClipboard } from "./linkManager";
 import { createCollectionGenerator } from "./collectionGenerator";
 import { createAnalyticsCalculator } from "./analyticsCalculator";
@@ -77,17 +80,31 @@ export default class LetterboxdPlugin extends Plugin {
 			name: "[Debug] Check TMDB API Key",
 			callback: async () => {
 				try {
-					const secret = await this.app.vault.getSecret("letterboxd-tmdb-api-key");
-					if (secret) {
-						const masked = secret.substring(0, 20) + "...";
-						new Notice(`✓ TMDB API Key found: ${masked}`);
-						if (window.DEBUG) {
-							console.log("[Letterboxd Plugin] TMDB API Key from vault:", secret);
+					const vault = (this.app.vault as any);
+					if (vault && typeof vault.getSecret === "function") {
+						const secret = await getSecret(this.app, "letterboxd-tmdb-api-key");
+						if (secret) {
+							const masked = secret.substring(0, 20) + "...";
+							new Notice(`✓ TMDB API Key found: ${masked}`);
+							if (window.DEBUG) {
+								console.log("[Letterboxd Plugin] TMDB API Key from vault:", secret);
+							}
+						} else {
+							new Notice("⚠ No TMDB API Key found in vault secrets");
+							if (window.DEBUG) {
+								console.log("[Letterboxd Plugin] TMDB API Key: not set");
+							}
 						}
 					} else {
-						new Notice("⚠ No TMDB API Key found in vault secrets");
+						// Vault secrets API not available - fall back to plugin settings
+						if (this.settings.tmdbApiKey) {
+							const masked = this.settings.tmdbApiKey.substring(0, 20) + "...";
+							new Notice(`✓ TMDB API Key found in plugin settings: ${masked}`);
+						} else {
+							new Notice("⚠ No TMDB API Key found (vault secrets not supported).");
+						}
 						if (window.DEBUG) {
-							console.log("[Letterboxd Plugin] TMDB API Key: not set");
+							console.log("[Letterboxd Plugin] Vault secrets not supported");
 						}
 					}
 				} catch (e) {
@@ -277,6 +294,49 @@ export default class LetterboxdPlugin extends Plugin {
 			callback: () => this.createFilmReview(),
 		});
 
+		// Export plugin functions wiki for the active account (basic)
+		this.addCommand({
+			id: "export-plugin-wiki",
+			name: "Export Plugin Functions to Wiki",
+			callback: async () => {
+				const active = this.getActiveAccount();
+				if (!active) {
+					new Notice("No active account configured. Add or switch to an account in Settings.");
+					return;
+				}
+				try {
+					await createOrUpdateWiki(this, active);
+					new Notice("Plugin functions wiki exported.");
+				} catch (e) {
+					console.error(e);
+					new Notice("Failed to export plugin wiki");
+				}
+			},
+		});
+
+		// Export extended plugin functions wiki for the active account (detailed)
+		this.addCommand({
+			id: "export-plugin-wiki-extended",
+			name: "Export Plugin Functions to Wiki (Extended)",
+			callback: async () => {
+				const active = this.getActiveAccount();
+				if (!active) {
+					new Notice("No active account configured. Add or switch to an account in Settings.");
+					return;
+				}
+				try {
+					// import the extended writer dynamically to avoid circulars
+					const { createOrUpdateWiki: createExt } = await import("./wikiGenerator.extended");
+					// createExt already builds extended content in wikiGenerator (same function name)
+					await createExt(this, active);
+					new Notice("Plugin functions extended wiki exported.");
+				} catch (e) {
+					console.error(e);
+					new Notice("Failed to export extended plugin wiki");
+				}
+			},
+		});
+
 		this.addRibbonIcon("clapperboard", "Sync Letterboxd diary", () => {
 			void this.syncDiary();
 		});
@@ -302,12 +362,18 @@ export default class LetterboxdPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		// Save TMDB API key to vault secrets
+		// Save TMDB API key to vault secrets when available
 		if (this.settings.tmdbApiKey) {
-			try {
-				await this.app.vault.setSecret("letterboxd-tmdb-api-key", this.settings.tmdbApiKey);
+			const vault = (this.app.vault as any);
+			if (vault && typeof vault.setSecret === "function") {
+				try {
+					await setSecret(this.app, "letterboxd-tmdb-api-key", this.settings.tmdbApiKey);
 			} catch (e) {
-				console.warn("[Letterboxd Plugin] Could not save API key to vault secret:", e);
+					console.warn("[Letterboxd Plugin] Could not save API key to vault secret:", e);
+				}
+			} else {
+				// Vault secrets API not available; keep key in settings as fallback
+				console.warn("[Letterboxd Plugin] Vault secrets not supported; storing API key in plugin settings instead");
 			}
 		}
 	}
@@ -321,9 +387,12 @@ export default class LetterboxdPlugin extends Plugin {
 
 	async getTmdbApiKey(): Promise<string> {
 		try {
-			const secret = await this.app.vault.getSecret("letterboxd-tmdb-api-key");
-			if (secret) {
-				return secret;
+			const vault = (this.app.vault as any);
+			if (vault && typeof vault.getSecret === "function") {
+				const secret = await getSecret(this.app, "letterboxd-tmdb-api-key");
+				if (secret) {
+					return secret;
+				}
 			}
 		} catch (e) {
 			console.warn("[Letterboxd Plugin] Error retrieving TMDB API key from vault:", e);
@@ -331,6 +400,48 @@ export default class LetterboxdPlugin extends Plugin {
 		// Fallback to settings value
 		return this.settings.tmdbApiKey || "";
 	}
+
+	/**
+	 * Search TMDB for a title and return TMDB id (helper used by batch import)
+	 */
+	async searchTmdbIdForTitle(title: string, apiKey: string, language = "en-US") {
+		try {
+			const { searchTMDBId } = await import("./tmdb/api");
+			const id = await searchTMDBId(title, apiKey, language);
+			return id;
+		} catch (e) {
+			console.warn("searchTmdbIdForTitle failed:", e);
+			return null;
+		}
+	}
+
+	/**
+	 * Batch import wrapper called from settings UI
+	 */
+	async batchImportFilmsFromList(lines: string[]) {
+		try {
+			const templateChoice = this.settings.batchImportTemplate || "tmdb";
+			const results = await batchImportFilms(this, lines, templateChoice);
+			console.log("Batch import results:", results);
+			new Notice(`Imported ${results.filter(r => r.created).length} films`);
+		} catch (e) {
+			console.error("Batch import failed:", e);
+			new Notice("Batch import failed");
+		}
+	}
+
+	async batchImportFilmsFromItems(items: Array<{title:string, rating?:number, status?:string, tags?:string[]}>) {
+		try {
+			const templateChoice = this.settings.batchImportTemplate || "tmdb";
+			const results = await batchImportFilmsFromItems(this, items, templateChoice);
+			console.log("Batch import results:", results);
+			new Notice(`Imported ${results.filter(r => r.created).length} films`);
+		} catch (e) {
+			console.error("Batch import failed:", e);
+			new Notice("Batch import failed");
+		}
+	}
+
 
 	/**
 	 * Triggers a diary sync via RSS
@@ -484,7 +595,7 @@ export default class LetterboxdPlugin extends Plugin {
 	 */
 	private addNewAccount(): void {
 		new AddAccountModal(this.app, async (details: AddAccountDetails) => {
-			const { name, username, apiKey, type } = details;
+			const { name, username, type } = details;
 
 			// Check if account already exists
 			if (this.accountManager.getAccountByUsername(username)) {
@@ -495,14 +606,6 @@ export default class LetterboxdPlugin extends Plugin {
 			// Add account to manager
 			const newAccount = this.accountManager.addAccount(name, username, type);
 			new Notice(`Account '${newAccount.name}' added.`);
-
-			// Save API key to vault secrets
-			try {
-				await this.app.vault.setSecret(`letterboxd-api-key-${username}`, apiKey);
-			} catch (e) {
-				console.warn(`[Letterboxd Plugin] Could not save API key for ${username}:`, e);
-				new Notice(`Could not save API key for ${username}.`);
-			}
 
 			// Persist updated accounts list
 			this.saveAccountsConfig();
@@ -556,9 +659,9 @@ export default class LetterboxdPlugin extends Plugin {
 						.onClick(async () => {
 							this.accountManager.removeAccount(accountToRemove.id);
 							try {
-								await this.app.vault.removeSecret(`letterboxd-api-key-${accountToRemove.username}`);
+								
 							} catch (e) {
-								console.warn(`[Letterboxd Plugin] Could not remove API key for ${accountToRemove.username}:`, e);
+								
 							}
 							this.saveAccountsConfig();
 							new Notice(`Account '${accountToRemove.name}' removed.`);
@@ -842,7 +945,14 @@ ${accountsList}`);
             if (existingFile instanceof TFile) {
                 await this.app.vault.modify(existingFile, svg);
             } else {
-                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch(() => {});
+                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch((err) => {
+                    if (err && String(err).toLowerCase().includes('already')) {
+                        // Folder likely exists
+                    } else if (err) {
+                        console.error(`Error creating Analytics folder for ${activeAccount.folderPath}:`, err);
+                        new Notice('Error creating Analytics folder. See console.');
+                    }
+                });
                 await this.app.vault.create(filePath, svg);
             }
             new Notice("Watch heatmap generated");
@@ -871,7 +981,14 @@ ${accountsList}`);
             if (existingFile instanceof TFile) {
                 await this.app.vault.modify(existingFile, content);
             } else {
-                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch(() => {});
+                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch((err) => {
+                    if (err && String(err).toLowerCase().includes('already')) {
+                        // Folder likely exists
+                    } else if (err) {
+                        console.error(`Error creating Analytics folder for ${activeAccount.folderPath}:`, err);
+                        new Notice('Error creating Analytics folder. See console.');
+                    }
+                });
                 await this.app.vault.create(filePath, content);
             }
             new Notice("Watch timeline generated");
@@ -900,7 +1017,14 @@ ${accountsList}`);
             if (existingFile instanceof TFile) {
                 await this.app.vault.modify(existingFile, content);
             } else {
-                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch(() => {});
+                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch((err) => {
+                    if (err && String(err).toLowerCase().includes('already')) {
+                        // Folder likely exists
+                    } else if (err) {
+                        console.error(`Error creating Analytics folder for ${activeAccount.folderPath}:`, err);
+                        new Notice('Error creating Analytics folder. See console.');
+                    }
+                });
                 await this.app.vault.create(filePath, content);
             }
             new Notice("Charts & statistics generated");
@@ -929,7 +1053,14 @@ ${accountsList}`);
             if (existingFile instanceof TFile) {
                 await this.app.vault.modify(existingFile, content);
             } else {
-                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch(() => {});
+                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch((err) => {
+                    if (err && String(err).toLowerCase().includes('already')) {
+                        // Folder likely exists
+                    } else if (err) {
+                        console.error(`Error creating Analytics folder for ${activeAccount.folderPath}:`, err);
+                        new Notice('Error creating Analytics folder. See console.');
+                    }
+                });
                 await this.app.vault.create(filePath, content);
             }
             new Notice("Top rankings generated");
@@ -958,7 +1089,14 @@ ${accountsList}`);
             if (existingFile instanceof TFile) {
                 await this.app.vault.modify(existingFile, content);
             } else {
-                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch(() => {});
+                await this.app.vault.createFolder(`${activeAccount.folderPath}/Analytics`).catch((err) => {
+                    if (err && String(err).toLowerCase().includes('already')) {
+                        // Folder likely exists
+                    } else if (err) {
+                        console.error(`Error creating Analytics folder for ${activeAccount.folderPath}:`, err);
+                        new Notice('Error creating Analytics folder. See console.');
+                    }
+                });
                 await this.app.vault.create(filePath, content);
             }
             new Notice("Watch streak report generated");
@@ -1029,9 +1167,27 @@ ${accountsList}`);
         const filmYear = Number(metadata.year || 0);
 
         const templateManager = createTemplateManager(this.app);
-        const modal = new ReviewTemplateModal(this.app, templateManager, filmTitle, filmYear);
+
+        // Attempt to fetch TMDB movie details if available to enrich the template
+        let movie: TMDBMovie | undefined = undefined;
+        try {
+            const tmdbId = metadata.tmdb_id || (metadata.tmdb_url ? String(metadata.tmdb_url).replace(/.*\/(\d+).*/, "$1") : null);
+            const apiKey = await this.getTmdbApiKey();
+            if (tmdbId && apiKey) {
+                try {
+                    // include credits to populate directors/cast if templates need them
+                    movie = await fetchTMDBMovie(tmdbId, apiKey, this.settings.tmdbLanguage || "en-US", true);
+                } catch (e) {
+                    console.warn("Could not fetch TMDB movie for review template enrichment:", e);
+                }
+            }
+        } catch (e) {
+            console.warn("Error while preparing review template movie data:", e);
+        }
+
+        const modal = new ReviewTemplateModal(this.app, templateManager, filmTitle, filmYear, movie);
         modal.onSelected = (templateName: string) => {
-            void templateManager.createReviewFromTemplate(templateName, filmTitle, filmYear).catch((e) => {
+            void templateManager.createReviewFromTemplate(templateName, filmTitle, filmYear, movie).catch((e) => {
                 console.error("Error creating review from template:", e);
                 new Notice("Failed to create review from template");
             });

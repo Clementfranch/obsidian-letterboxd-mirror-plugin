@@ -2,9 +2,7 @@
 import { App, Modal, Setting } from "obsidian";
 import type { LetterboxdAccount } from "../types";
 
-export type AddAccountDetails = Pick<LetterboxdAccount, "name" | "username" | "type"> & {
-    apiKey: string;
-};
+export type AddAccountDetails = Pick<LetterboxdAccount, "name" | "username" | "type">;
 
 type OnSaveCallback = (details: AddAccountDetails) => void;
 
@@ -18,7 +16,6 @@ export class AddAccountModal extends Modal {
         this.details = {
             name: "",
             username: "",
-            apiKey: "",
             type: "personal",
         };
     }
@@ -53,18 +50,6 @@ export class AddAccountModal extends Modal {
                     })
             );
 
-        new Setting(contentEl)
-            .setName("Letterboxd API Key")
-            .setDesc("Your Letterboxd API Key. This is stored as a secret in your vault.")
-            .addText((text) => {
-                text
-                    .setPlaceholder("Enter API Key")
-                    .setValue(this.details.apiKey)
-                    .onChange((value) => {
-                        this.details.apiKey = value;
-                    });
-                text.inputEl.type = "password";
-            });
 
         new Setting(contentEl)
             .setName("Account Type")
@@ -90,7 +75,7 @@ export class AddAccountModal extends Modal {
                     .setButtonText("Save")
                     .setCta()
                     .onClick(() => {
-                        if (!this.details.name || !this.details.username || !this.details.apiKey) {
+                        if (!this.details.name || !this.details.username) {
                             new Notice("Please fill out all fields.");
                             return;
                         }

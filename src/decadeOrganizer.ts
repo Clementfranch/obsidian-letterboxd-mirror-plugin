@@ -1,4 +1,4 @@
-import { App, TFolder, TFile } from "obsidian";
+import { App, TFolder, TFile, Notice } from "obsidian";
 
 /** Film data for decade organization */
 export interface FilmDecadeData {
@@ -70,8 +70,13 @@ export class DecadeOrganizer {
 
 			try {
 				// Ensure folder exists
-				await this.app.vault.createFolder(folderPath).catch(() => {
-					// Folder exists
+				await this.app.vault.createFolder(folderPath).catch((err) => {
+					if (err && String(err).toLowerCase().includes('already')) {
+						// Folder likely exists, ignore
+					} else if (err) {
+						console.error(`Error creating folder ${folderPath}:`, err);
+						new Notice(`Error creating folder: ${folderPath}. See console.`);
+					}
 				});
 
 				// Write index

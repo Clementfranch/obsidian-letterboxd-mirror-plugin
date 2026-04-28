@@ -1,8 +1,9 @@
-import { App, normalizePath, PluginSettingTab, Setting, debounce, Notice, Modal } from "obsidian";
+import { App, normalizePath, PluginSettingTab, Setting, debounce, Notice, Modal, TFile } from "obsidian";
 import type LetterboxdPlugin from "./main";
 import type { LetterboxdSettings, NotificationLevel, LetterboxdAccount } from "./types";
 import { TemplateEditorModal } from "./ui/template-editor-modal";
 import { AddAccountModal, AddAccountDetails } from "./ui/add-account-modal";
+import { BatchImportModal } from "./ui/batch-import-modal";
 
 /** Debounce delay for saving settings (ms) */
 const SETTINGS_SAVE_DEBOUNCE_MS = 500;
@@ -21,13 +22,11 @@ letterboxd_tags: <%= it.tags.yaml() %>
 
 # [[<%= it.filmTitle %> (<%= it.filmYear %>)]]
 
-<% if (!it.posterUrl.isEmpty()) { %>![Poster](<%= it.posterUrl %>)
-<% } %>
+<%= !it.posterUrl.isEmpty() ? ('![' + 'Poster' + '](' + it.posterUrl + ')') : '' %>
 **Rating**: <%= it.userRating.stars() %>
-**Watched**: <%= it.watchedDate %><% if (it.rewatch.isTrue()) { %> (rewatch)<% } %>
+**Watched**: <%= it.watchedDate + (it.rewatch.isTrue() ? ' (rewatch)' : '') %>
 
-<% if (!it.review.isEmpty()) { %><%= it.review.quote() %>
-<% } %>
+<%= !it.review.isEmpty() ? it.review.quote() : '' %>
 ---
 [View on Letterboxd](<%= it.link %>)
 `;
@@ -174,6 +173,10 @@ export const DEFAULT_SETTINGS: LetterboxdSettings = {
 	// Multi-account settings
 	accounts: [],
 	activeAccountId: null,
+	// Batch import and rating settings
+	batchImportTemplate: "tmdb",
+		batchCustomTemplate: "",
+	ratingScaleMax: 10,
 };
 
 export class LetterboxdSettingTab extends PluginSettingTab {
@@ -196,6 +199,53 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		this.drawAccountManagement(containerEl);
+
+		// ============================================================================
+		// Commandes (liste et description)
+		// ============================================================================
+		new Setting(containerEl).setName("Commandes du plugin").setHeading();
+
+		// List of common commands and short descriptions for usability
+		new Setting(containerEl)
+			.setName("Sync Letterboxd diary")
+			.setDesc("Synchronise les entrées du journal depuis Letterboxd (RSS/RPC)");
+
+		new Setting(containerEl)
+			.setName("Import from Letterboxd CSV")
+			.setDesc("Importe les fichiers diary.csv / reviews.csv exportés depuis Letterboxd");
+
+		new Setting(containerEl)
+			.setName("Sync TMDB film data")
+			.setDesc("Récupère et met à jour les données de films depuis TMDB pour les entrées créées");
+
+		new Setting(containerEl)
+			.setName("Add / Switch / Remove account")
+			.setDesc("Gestion multi-comptes : ajouter, basculer ou supprimer un compte Letterboxd");
+
+		new Setting(containerEl)
+			.setName("Batch import (TMDB-based)")
+			.setDesc("Importer en lot des titres, recherche TMDB automatique et création de notes en masse");
+
+		new Setting(containerEl)
+			.setName("Generate Watchlist / Collections / Analytics")
+			.setDesc("Commandes générant watchlists, collections, heatmaps, timelines et classements")
+
+		new Setting(containerEl)
+			.setName("Export Plugin Functions to Wiki")
+			.setDesc("Exporte la documentation des commandes et fonctions du plugin dans le vault")
+
+		new Setting(containerEl)
+			.setName("Template editor / Note templates")
+			.setDesc("Ouvre l'éditeur de template avec aperçu; modifier les templates de fichier et note")
+
+		new Setting(containerEl)
+			.setName("Debug: Check TMDB API Key")
+			.setDesc("Vérifie si la clé TMDB est présente dans les secrets du vault (fallback paramètres)");
+
+		new Setting(containerEl)
+			.setName("Other utility commands")
+			.setDesc("Diverses commandes: organiser par décennie, citation aléatoire, génération de rapports")
+
 
 		// ============================================================================
 		// General settings (no heading per Obsidian guidelines)
@@ -309,8 +359,7 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 				})
 			);
 
-		// ============================================================================
-		// TMDB integration section
+// TMDB integration section
 		// ============================================================================
 
 		new Setting(containerEl).setName("TMDB integration").setHeading();
@@ -327,81 +376,123 @@ export class LetterboxdSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setDesc(tmdbDesc);
 
 		const tmdbTokenSetting = new Setting(containerEl)
-.setName("API read access token")
+.setName("TMDB API Read Access Token")
 .setDesc(
-createDescWithLink(
-"Get your token from ",
-"TMDB API settings",
-"https://www.themoviedb.org/settings/api"
-)
+	createDescWithLink(
+		"Get your token from ",
+		"TMDB API settings",
+		"https://www.themoviedb.org/settings/api"
+	)
 );
 
+// Add both Set and Remove buttons to the same setting to group them
 // Set token button
-new Setting(containerEl).addButton((btn) => {
-btn.setButtonText("Set token").onClick(() => {
-const modal = new Modal(this.app);
-modal.titleEl.setText("Set TMDB API token");
-const input = document.createElement("input");
-input.type = "password";
-input.placeholder = "Enter TMDB token";
-input.className = "setting-text-input letterboxd-monospace-input";
-modal.contentEl.appendChild(input);
-const saveBtn = document.createElement("button");
-saveBtn.textContent = "Save token";
-saveBtn.className = "mod-cta";
-saveBtn.style.marginTop = "8px";
-saveBtn.onclick = async () => {
-const val = (input as HTMLInputElement).value.trim();
-if (!val) {
-new Notice("Token cannot be empty");
-return;
-}
-try {
-await this.app.vault.setSecret("letterboxd-tmdb-api-key", val);
-this.plugin.settings.tmdbApiKey = "";
-await this.plugin.saveSettings();
-new Notice("TMDB token saved to vault secrets");
-modal.close();
-} catch (e) {
-console.error("Error saving TMDB token:", e);
-new Notice("Failed to save token to vault secrets");
-}
-};
-modal.contentEl.appendChild(saveBtn);
-modal.open();
-});
+tmdbTokenSetting.addButton((btn) => {
+	btn.setButtonText("Set token").onClick(() => {
+		const modal = new Modal(this.app);
+		modal.titleEl.setText("Set TMDB API token");
+		const input = document.createElement("input");
+		input.type = "password";
+		input.placeholder = "Enter TMDB token";
+		input.className = "setting-text-input letterboxd-monospace-input";
+		modal.contentEl.appendChild(input);
+		const saveBtn = document.createElement("button");
+		saveBtn.textContent = "Save token";
+		saveBtn.className = "mod-cta";
+		saveBtn.style.marginTop = "8px";
+		saveBtn.onclick = async () => {
+			const val = (input as HTMLInputElement).value.trim();
+			if (!val) {
+				new Notice("Token cannot be empty");
+				return;
+			}
+
+			// Prefer vault secrets when available, otherwise fall back to plugin settings
+			const vault = this.app.vault as any;
+			if (vault && typeof vault.setSecret === "function") {
+				try {
+					await vault.setSecret("letterboxd-tmdb-api-key", val);
+					this.plugin.settings.tmdbApiKey = "";
+					await this.plugin.saveSettings();
+					new Notice("TMDB token saved to vault secrets");
+					modal.close();
+				} catch (e) {
+					console.error("Error saving TMDB token:", e);
+					new Notice("Failed to save token to vault secrets");
+				}
+			} else {
+				// Fallback: store in plugin settings
+				this.plugin.settings.tmdbApiKey = val;
+				await this.plugin.saveSettings();
+				new Notice("TMDB token saved to plugin settings (vault secrets not supported)");
+				modal.close();
+			}
+		};
+		modal.contentEl.appendChild(saveBtn);
+		modal.open();
+	});
 });
 
 // Remove token button
-new Setting(containerEl).addButton((btn) => {
-btn.setButtonText("Remove token").setWarning().onClick(async () => {
-try {
-await this.app.vault.removeSecret("letterboxd-tmdb-api-key");
-this.plugin.settings.tmdbApiKey = "";
-await this.plugin.saveSettings();
-new Notice("TMDB token removed from vault secrets");
-} catch (e) {
-console.warn("Could not remove TMDB token:", e);
-new Notice("Failed to remove TMDB token");
-}
-});
+tmdbTokenSetting.addButton((btn) => {
+	btn.setButtonText("Remove token").setWarning().onClick(async () => {
+		const vault = (this.app.vault as any);
+		if (vault && typeof vault.removeSecret === "function") {
+			try {
+				await vault.removeSecret("letterboxd-tmdb-api-key");
+				this.plugin.settings.tmdbApiKey = "";
+				await this.plugin.saveSettings();
+				new Notice("TMDB token removed from vault secrets");
+			} catch (e) {
+				console.warn("Could not remove TMDB token:", e);
+				new Notice("Failed to remove TMDB token");
+			}
+		} else {
+			// Fallback: clear plugin settings value
+			this.plugin.settings.tmdbApiKey = "";
+			await this.plugin.saveSettings();
+			new Notice("TMDB token cleared from plugin settings (vault secrets not supported)");
+		}
+	});
 });
 
 // Show masked token status asynchronously
 (async () => {
-try {
-const secret = await this.plugin.getTmdbApiKey();
-if (secret) {
-const masked = secret.length > 8 ? secret.substring(0, 4) + "..." + secret.substring(secret.length - 4) : "(set)";
-tmdbTokenSetting.setDesc(() => {
-const frag = createDescWithLink("Get your token from ", "TMDB API settings", "https://www.themoviedb.org/settings/api");
-frag.appendText(` Current token: ${masked}`);
-return frag;
-});
-}
-} catch (e) {
-console.warn("Error checking TMDB secret:", e);
-}
+    try {
+        const vault = (this.app.vault as any);
+        let secret = "";
+        let sourceNote = "";
+
+        // Prefer explicit vault secret when available
+        if (vault && typeof vault.getSecret === "function") {
+            try {
+                const vaultSecret = await vault.getSecret("letterboxd-tmdb-api-key");
+                if (vaultSecret) {
+                    secret = vaultSecret;
+                    sourceNote = " (stored in vault secrets)";
+                }
+            } catch (e) {
+                console.warn("Error reading TMDB token from vault secrets:", e);
+            }
+        }
+
+        // Fall back to plugin settings value if not found in vault
+        if (!secret && this.plugin.settings.tmdbApiKey) {
+            secret = this.plugin.settings.tmdbApiKey;
+            sourceNote = " (stored in plugin settings - less secure)";
+        }
+
+        if (secret) {
+            const masked = secret.length > 8 ? secret.substring(0, 4) + "..." + secret.substring(secret.length - 4) : "(set)";
+            tmdbTokenSetting.setDesc(() => {
+                const frag = createDescWithLink("Get your token from ", "TMDB API settings", "https://www.themoviedb.org/settings/api");
+                frag.appendText(` Current token: ${masked}${sourceNote}`);
+                return frag;
+            });
+        }
+    } catch (e) {
+        console.warn("Error checking TMDB secret:", e);
+    }
 })();
 
 		new Setting(containerEl)
@@ -528,6 +619,142 @@ console.warn("Error checking TMDB secret:", e);
 					this.debouncedSave();
 				})
 			);
+
+		// ============================================================================
+		// Batch import films (bulk create)
+		// ============================================================================
+		new Setting(containerEl).setName("Batch import films").setHeading();
+		
+		const batchDesc = document.createDocumentFragment();
+		batchDesc.appendText("Paste a list of film titles (one per line). If TMDB API token is set, the plugin will attempt to enrich metadata from TMDB.");
+		new Setting(containerEl).setDesc(() => batchDesc);
+		
+		// Template selection for batch import
+		new Setting(containerEl)
+			.setName("Batch import template")
+			.setDesc("Choose which template to use for created film notes")
+			.addDropdown((dd) => {
+				dd.addOption("tmdb", "TMDB-enriched (if available)");
+				dd.addOption("minimal", "Minimal frontmatter");
+				dd.addOption("custom", "Custom template (edit below)");
+				dd.setValue(this.plugin.settings.batchImportTemplate || "tmdb").onChange((v) => {
+					this.plugin.settings.batchImportTemplate = v as any; // allow tmdb|minimal|custom
+					this.debouncedSave();
+				});
+			});
+
+		// Custom template editor for batch import
+		new Setting(containerEl)
+			.setName("Custom batch template")
+			.setDesc("Edit the custom template used when Batch import template is set to Custom")
+			.addButton((button) =>
+				button.setButtonText("Edit custom template").onClick(() => {
+					new TemplateEditorModal(this.app, {
+						title: "Edit custom batch import template",
+						template: this.plugin.settings.batchCustomTemplate || this.plugin.settings.tmdbNoteTemplate,
+						defaultTemplate: DEFAULT_TMDB_NOTE_TEMPLATE,
+						onSave: (template) => {
+							this.plugin.settings.batchCustomTemplate = template;
+							void this.plugin.saveSettings();
+						},
+					}).open();
+				})
+			);
+
+		// Rating scale max
+		new Setting(containerEl)
+			.setName("Rating scale maximum")
+			.setDesc("Maximum numeric rating allowed for rating fields (e.g., 10)")
+			.addText((text) =>
+				text.setValue(String(this.plugin.settings.ratingScaleMax || 10)).onChange((v) => {
+					const n = parseInt(v, 10) || 10;
+					this.plugin.settings.ratingScaleMax = Math.max(1, Math.min(20, n));
+					this.debouncedSave();
+				})
+			);
+
+		// Textarea for titles
+		const textarea = document.createElement("textarea");
+		textarea.style.width = "100%";
+		textarea.style.minHeight = "120px";
+		textarea.placeholder = "One title per line\nExample:\n2012 (2009)\nInception (2010)\nThe Matrix (1999)";
+		
+		new Setting(containerEl)
+			.setName("Film list")
+			.setDesc("Paste titles here and click Import")
+			.setClass("letterboxd-batch-import")
+			.addTextArea((ta) => {
+				ta.inputEl.replaceWith(textarea);
+			});
+		
+		new Setting(containerEl)
+			.addButton((btn) => btn.setButtonText("Import").setCta().onClick(async () => {
+				const raw = textarea.value;
+				if (!raw || !raw.trim()) {
+					new Notice("No titles provided");
+					return;
+				}
+				const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l.length>0);
+				// Build initial items
+				const items = lines.map(l => ({ title: l }));
+				// Open review modal to allow edits before creation
+				new BatchImportModal(this.app, items, this.plugin.settings.ratingScaleMax || 10, async (finalItems) => {
+					await this.plugin.batchImportFilmsFromItems(finalItems);
+				}).open();
+			}))
+			.addButton((btn) => btn.setButtonText("Clear").onClick(() => { textarea.value = ""; }));
+
+		// ============================================================================
+		// Plugin functions (individual quick actions)
+		// ============================================================================
+
+		new Setting(containerEl).setName("Plugin functions").setHeading();
+
+		const pluginFeatures = [
+			{ id: 'sync-diary', title: "Sync Letterboxd diary", desc: "Fetch diary entries and create/update diary notes" },
+			{ id: 'import-csv', title: "Import from CSV", desc: "Import films/reviews from Letterboxd CSV export" },
+			{ id: 'sync-films', title: "Sync TMDB films", desc: "Enrich film notes using TMDB data (requires token)" },
+			{ id: 'add-account', title: "Manage Accounts", desc: "Add / Switch / Remove multiple Letterboxd accounts" },
+			{ id: 'sync-watchlist', title: "Sync Watchlist", desc: "Sync active account's watchlist and mark notes to-watch" },
+			{ id: 'generate-watchlist', title: "Generate Collections", desc: "Create Watchlist, Favorites, Mood-based collections" },
+			{ id: 'generate-heatmap', title: "Analytics & Visuals", desc: "Generate TotalTime, Heatmap, Timeline, Charts, Rankings, Streak reports" },
+			{ id: 'organize-by-decade', title: "Organize by Decade", desc: "Group film notes into decade folders" },
+			{ id: 'random-movie-quote', title: "Random Movie Quote", desc: "Show a random movie citation from your films" },
+			{ id: 'create-film-review', title: "Create Review from Template", desc: "Create a review note from predefined templates" },
+			{ id: 'open-film-imdb', title: "Open / Copy Links", desc: "Open or copy IMDb / TMDB / Letterboxd / RottenTomatoes links" },
+		];
+
+		for (const f of pluginFeatures) {
+			const setting = new Setting(containerEl)
+				.setName(f.title)
+				.setDesc(() => {
+					const frag = document.createDocumentFragment();
+					frag.createEl("code", { text: f.id });
+					frag.appendText(` \u2014 ${f.desc}`);
+					return frag;
+				});
+			setting.addButton((btn) =>
+				btn.setButtonText("Run").setCta().onClick(() => {
+					try {
+						this.plugin.app.commands.executeCommandById(f.id);
+					} catch (e) {
+						console.error("Failed to run command", f.id, e);
+						new Notice(`Failed to run ${f.id}`);
+					}
+				})
+			);
+			setting.addButton((btn) =>
+				btn.setButtonText("Copy ID").onClick(async () => {
+					try {
+						await navigator.clipboard.writeText(f.id);
+						new Notice("Copied ID to clipboard");
+					} catch (e) {
+						console.error("Failed to copy ID", e);
+						new Notice("Failed to copy ID to clipboard");
+					}
+				})
+			);
+		}
 	}
     
     private drawAccountManagement(containerEl: HTMLElement): void {
@@ -575,7 +802,7 @@ console.warn("Error checking TMDB secret:", e);
 
 	private showAddAccountModal(): void {
 		new AddAccountModal(this.app, async (details) => {
-            const { name, username, apiKey, type } = details;
+            const { name, username, type } = details;
 
 			if (this.plugin.accountManager.getAccountByUsername(username)) {
 				new Notice(`An account with username '${username}' already exists.`);
@@ -584,12 +811,6 @@ console.warn("Error checking TMDB secret:", e);
 
 			this.plugin.accountManager.addAccount(name, username, type);
 			
-			try {
-				await this.app.vault.setSecret(`letterboxd-api-key-${username}`, apiKey);
-			} catch (e) {
-				console.warn(`[Letterboxd Plugin] Could not save API key for ${username}:`, e);
-				new Notice(`Could not save API key for ${username}.`);
-			}
 
 			await this.plugin.saveSettings();
 			this.display();
@@ -608,21 +829,11 @@ console.warn("Error checking TMDB secret:", e);
 
 		if (confirm(`Remove account "${account?.name}"? This cannot be undone.`)) {
 			this.plugin.accountManager.removeAccount(accountId);
-            void this.app.vault.removeSecret(`letterboxd-api-key-${account.username}`);
 			void this.plugin.saveSettings();
 			this.display();
 		}
 	}
 
-	private async saveApiKeyToVault(): Promise<void> {
-		if (this.plugin.settings.tmdbApiKey) {
-			try {
-				await this.app.vault.setSecret("letterboxd-tmdb-api-key", this.plugin.settings.tmdbApiKey);
-			} catch (e) {
-				console.warn("[Letterboxd Plugin] Could not save API key to vault secret:", e);
-			}
-		}
-	}
 }
 
 /**

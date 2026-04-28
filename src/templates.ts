@@ -1,4 +1,4 @@
-import { App, Modal, Setting, TFile } from "obsidian";
+import { App, Modal, Setting, TFile, Notice } from "obsidian";
 import type { TMDBMovie } from "./tmdb/types";
 
 /** Review template content */
@@ -113,16 +113,32 @@ _Watched on: {{DATE}}_
         }
 
 		// Create file
-		const filename = `${filmTitle}_Review.md`;
+		const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]+/g, "-").trim();
+		const baseFilename = `${sanitize(filmTitle)}_Review.md`;
 		const folderPath = "Efforts/Reviews"; // TODO: Make this configurable
 
 		try {
-			await this.app.vault.createFolder(folderPath).catch(() => {
-				// Folder exists
+			await this.app.vault.createFolder(folderPath).catch((err) => {
+				if (err && String(err).toLowerCase().includes('already')) {
+					// Folder likely exists, ignore
+				} else if (err) {
+					console.error(`Error creating folder ${folderPath}:`, err);
+					new Notice(`Error creating folder: ${folderPath}. See console.`);
+				}
 			});
 
-			const newFile = await this.app.vault.create(`${folderPath}/${filename}`, content);
-            this.app.workspace.getLeaf(true).openFile(newFile);
+			// Avoid overwriting existing reviews: if the file exists, add an incrementing suffix
+			let targetPath = `${folderPath}/${baseFilename}`;
+			let counter = 1;
+			while (this.app.vault.getAbstractFileByPath(targetPath)) {
+				const nameOnly = baseFilename.replace(/\.md$/i, "");
+				targetPath = `${folderPath}/${nameOnly} (${counter}).md`;
+				counter++;
+				if (counter > 100) break; // safety
+			}
+
+			const newFile = await this.app.vault.create(targetPath, content);
+			this.app.workspace.getLeaf(true).openFile(newFile);
 		} catch (error) {
 			console.error("Error creating review file:", error);
 			throw error;

@@ -207,3 +207,29 @@ export async function validateTMDBApiKey(apiKey: string): Promise<boolean> {
 		return false;
 	}
 }
+
+/**
+ * Search TMDB for a movie title and return the first matching movie ID (if any)
+ * @param query - Movie title to search for
+ * @param apiKey - TMDB API Read Access Token (Bearer token)
+ * @param language - Language code
+ */
+export async function searchTMDBId(query: string, apiKey: string, language = "en-US"): Promise<number | null> {
+	if (!query || !apiKey) return null;
+	const url = `${TMDB_API_BASE_URL}/search/movie?query=${encodeURIComponent(query)}&language=${language}`;
+	const response = await requestUrl({
+		url,
+		method: "GET",
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+		},
+	});
+	if (response.status !== 200) return null;
+	const data = response.json as any;
+	if (data && data.results && data.results.length > 0) {
+		return data.results[0].id;
+	}
+	return null;
+}
+

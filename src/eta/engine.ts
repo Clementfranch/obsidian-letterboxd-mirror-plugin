@@ -65,7 +65,21 @@ const eta = new Eta({
  * @param data - Data object to pass to the template
  * @returns Rendered string
  */
-export function renderTemplate<T extends object>(template: string, data: T): string {
+/**
+ * Basic safety check for templates: disallow evaluation tags `<% ... %>`
+ * Allow only interpolation tags `<%= ... %>` and `<%- ... %>` which do not execute arbitrary statements.
+ */
+export function isTemplateSafe(template: string): boolean {
+	if (!template) return true;
+	// Match `<%` not followed by `=` or `-` (so `<% ... %>`)
+	const unsafeEvalTag = /<%(?![=-])[\s\S]*?%>/;
+	return !unsafeEvalTag.test(template);
+}
+
+export function renderTemplate<T extends object>(template: string, data: T, options?: { allowUnsafe?: boolean }): string {
+	if (!options?.allowUnsafe && !isTemplateSafe(template)) {
+		throw new Error("Unsafe template: <% ... %> evaluation tags are not allowed. Use <%= or <%- for interpolation only, or enable trusted templates in settings.");
+	}
 	return eta.renderString(template, data);
 }
 
@@ -76,7 +90,15 @@ export function renderTemplate<T extends object>(template: string, data: T): str
  * @returns Sanitized filename (without extension)
  */
 export function generateFilename<T extends object>(template: string, data: T): string {
-	let filename = eta.renderString(template, data);
+	let filename = "";
+	try {
+		// Reuse renderTemplate to ensure safety
+		filename = renderTemplate(template, data);
+	} catch (e) {
+		// Fall back to a simple safe placeholder if rendering fails
+		console.error('Filename template render failed, falling back to default name:', e);
+		filename = 'untitled';
+	}
 
 	// Sanitize: remove characters invalid in filenames
 	// Invalid chars: / \ : * ? " < > |
@@ -86,6 +108,9 @@ export function generateFilename<T extends object>(template: string, data: T): s
 	// Remove leading/trailing whitespace and dots
 	const LEADING_TRAILING_DOTS = /^\.+|\.+$/g;
 	filename = filename.trim().replace(LEADING_TRAILING_DOTS, "");
+
+	// Ensure non-empty
+	if (!filename) filename = 'untitled';
 
 	return filename;
 }

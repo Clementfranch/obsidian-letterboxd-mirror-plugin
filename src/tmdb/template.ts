@@ -236,9 +236,14 @@ function extractImagePath(url: string): string {
  * @param movie - TMDB movie data
  * @returns Rendered template string
  */
-export function renderTMDBTemplate(template: string, movie: TMDBMovie): string {
+export function renderTMDBTemplate(template: string, movie: TMDBMovie, options?: { allowUnsafe?: boolean }): string {
 	const data = wrapTMDBMovie(movie);
-	return etaRender(template, data);
+	return etaRender(template, data, options);
+}
+
+export function generateTMDBFilename(filenameTemplate: string, movie: TMDBMovie, options?: { allowUnsafe?: boolean }): string {
+	const data = wrapTMDBMovie(movie);
+	return etaGenerateFilename(filenameTemplate, data /* filenames should generally be safe */);
 }
 
 /**
